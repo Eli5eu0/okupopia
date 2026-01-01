@@ -1,11 +1,11 @@
 
-  # Sistema de Caixa de Entrada de Chat
+  # Chat Inbox System
 
-  Este é um pacote de códigos para o Sistema de Caixa de Entrada de Chat.
+  This is a code bundle for Chat Inbox System. The original project is available at https://www.figma.com/design/wdUycLgLeIlan0Zj5nuo8i/Chat-Inbox-System.
 
-  ## Rodando o código
-  
-  Execute para instalar as dependências. `npm i`
+  ## Running the code
 
-  Execute para iniciar o servidor de desenvolvimento.npm run dev. `npm run dev`
+  Run `npm i` to install the dependencies.
+
+  Run `npm run dev` to start the development server.
   

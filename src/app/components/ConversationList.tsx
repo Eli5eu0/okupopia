@@ -102,7 +102,21 @@ export function ConversationList({
   );
 
   return (
-    <div className="h-screen flex flex-col bg-white border-r border-gray-200">
+    <div className="h-full flex flex-col bg-white">
+      {/* Profile Page */}
+      {showProfile && (
+        <ProfilePage 
+          username={currentUsername} 
+          onClose={() => setShowProfile(false)} 
+          onLogout={onLogout}
+        />
+      )}
+
+      {/* Admin Panel */}
+      {showAdmin && (
+        <AdminPanel onClose={() => setShowAdmin(false)} />
+      )}
+
       {/* Header */}
       <div className="bg-gradient-to-r from-blue-500 to-purple-600 p-4 text-white">
         <div className="flex items-center justify-between mb-4">
@@ -185,20 +199,6 @@ export function ConversationList({
             )}
           </div>
         </div>
-      )}
-
-      {/* Admin Panel */}
-      {showAdmin && (
-        <AdminPanel onClose={() => setShowAdmin(false)} />
-      )}
-
-      {/* Profile Page */}
-      {showProfile && (
-        <ProfilePage 
-          username={currentUsername} 
-          onClose={() => setShowProfile(false)} 
-          onLogout={onLogout}
-        />
       )}
 
       {/* Conversations List */}

@@ -59,8 +59,11 @@ export function LoginScreen({ onLogin }: LoginScreenProps) {
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
             </svg>
           </div>
-          <h1>{isSignup ? "Criar Conta" : "Okupopia"}</h1>
-          <p className="text-gray-600">Sistema de Mensagens Distribuído</p>
+          <h1 className="text-transparent bg-clip-text bg-gradient-to-r from-blue-600 to-purple-600 mb-2">
+            Okupopia
+          </h1>
+          <p className="text-gray-600 mb-1">{isSignup ? "Criar Conta" : "Bem-vindo de volta"}</p>
+          <p className="text-sm text-gray-500">Sistema de Mensagens Distribuído</p>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
