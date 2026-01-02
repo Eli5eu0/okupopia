@@ -1,7 +1,7 @@
 
   # Chat Inbox System
 
-  This is a code bundle for Chat Inbox System. The original project is available at https://www.figma.com/design/wdUycLgLeIlan0Zj5nuo8i/Chat-Inbox-System.
+  This is a code bundle for Chat Inbox System.
 
   ## Running the code
 
