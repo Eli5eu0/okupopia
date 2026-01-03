@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { projectId, publicAnonKey } from "../../../utils/supabase/info";
+import { API_URL } from "../../../utils/supabase/info";
 
 interface ChordNode {
   id: number;
@@ -38,43 +38,28 @@ export function AdminPanel({ onClose }: AdminPanelProps) {
 
   const fetchData = async () => {
     try {
-      // Fetch nodes
-      const nodesRes = await fetch(
-        `https://${projectId}.supabase.co/functions/v1/make-server-aef9e41b/admin/nodes`,
-        {
-          headers: { Authorization: `Bearer ${publicAnonKey}` },
-        }
-      );
+      // Fetch nodes do Servidor Python Local
+      const nodesRes = await fetch(`${API_URL}/admin/nodes`);
       if (nodesRes.ok) {
         const data = await nodesRes.json();
         setNodes(data.nodes);
       }
 
-      // Fetch logs
-      const logsRes = await fetch(
-        `https://${projectId}.supabase.co/functions/v1/make-server-aef9e41b/admin/logs`,
-        {
-          headers: { Authorization: `Bearer ${publicAnonKey}` },
-        }
-      );
+      // Fetch logs do Servidor Python Local
+      const logsRes = await fetch(`${API_URL}/admin/logs`);
       if (logsRes.ok) {
         const data = await logsRes.json();
         setLogs(data.logs);
       }
 
-      // Fetch distribution
-      const distRes = await fetch(
-        `https://${projectId}.supabase.co/functions/v1/make-server-aef9e41b/admin/distribution`,
-        {
-          headers: { Authorization: `Bearer ${publicAnonKey}` },
-        }
-      );
+      // Fetch distribution do Servidor Python Local
+      const distRes = await fetch(`${API_URL}/admin/distribution`);
       if (distRes.ok) {
         const data = await distRes.json();
         setDistribution(data.distribution);
       }
     } catch (error) {
-      console.error("Error fetching admin data:", error);
+      console.error("Error fetching admin data from Local Server:", error);
     } finally {
       setLoading(false);
     }
@@ -88,15 +73,15 @@ export function AdminPanel({ onClose }: AdminPanelProps) {
 
   const toggleNode = async (nodeId: number) => {
     try {
-      const res = await fetch(
-        `https://${projectId}.supabase.co/functions/v1/make-server-aef9e41b/admin/nodes/${nodeId}/toggle`,
-        {
-          method: "POST",
-          headers: { Authorization: `Bearer ${publicAnonKey}` },
-        }
-      );
+      const res = await fetch(`${API_URL}/admin/nodes/${nodeId}/toggle`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+      });
+
       if (res.ok) {
-        await fetchData();
+        // Aguardamos 300ms antes de buscar os dados 
+        // para dar tempo do Supabase processar a escrita do Python
+        setTimeout(() => fetchData(), 300);
       }
     } catch (error) {
       console.error("Error toggling node:", error);
@@ -105,14 +90,15 @@ export function AdminPanel({ onClose }: AdminPanelProps) {
 
   const clearLogs = async () => {
     try {
-      await fetch(
-        `https://${projectId}.supabase.co/functions/v1/make-server-aef9e41b/admin/logs`,
-        {
-          method: "DELETE",
-          headers: { Authorization: `Bearer ${publicAnonKey}` },
-        }
-      );
-      await fetchData();
+      // Apontando para o servidor local
+      const res = await fetch(`${API_URL}/admin/logs`, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+      });
+
+      if (res.ok) {
+        fetchData();
+      }
     } catch (error) {
       console.error("Error clearing logs:", error);
     }

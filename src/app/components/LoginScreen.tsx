@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { projectId, publicAnonKey } from "../../../utils/supabase/info";
+import { projectId, publicAnonKey, API_URL } from "../../../utils/supabase/info";
 
 interface LoginScreenProps {
   onLogin: (username: string, name: string) => void;
@@ -22,17 +22,11 @@ export function LoginScreen({ onLogin }: LoginScreenProps) {
       const endpoint = isSignup ? "/signup" : "/signin";
       const body = isSignup ? { username, password, name } : { username, password };
 
-      const response = await fetch(
-        `https://${projectId}.supabase.co/functions/v1/make-server-aef9e41b${endpoint}`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${publicAnonKey}`,
-          },
-          body: JSON.stringify(body),
-        }
-      );
+      const response = await fetch(`${API_URL}${endpoint}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      });
 
       const data = await response.json();
 
