@@ -64,8 +64,18 @@ export function ChatWindow({ globalSocket, currentUsername, otherUsername, other
       } 
       else if (data.type === "chat") {
         if (data.from === otherUsername) {
-          setMessages(prev => [...prev, data]);
+          setMessages(prev => {
+            // Checagem extra de segurança por ID
+            if (prev.find(m => m.id === data.id)) return prev;
+            return [...prev, data];
+          });
           onNewMessage(); 
+
+          fetch(`${API_URL}/mark-read`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ username: currentUsername, otherUser: otherUsername })
+          });
         }
       }
     };
@@ -113,24 +123,25 @@ export function ChatWindow({ globalSocket, currentUsername, otherUsername, other
 
   const handleSendMessage = (e: React.FormEvent) => {
     e.preventDefault();
-    // if (!newMessage.trim() || !globalSocket) return;
+    
     if (!newMessage.trim() || !globalSocket || globalSocket.readyState !== WebSocket.OPEN) return;
 
+    const timestamp = Date.now();
     const msgPayload: Message = {
-      id: `${Date.now()}`,
+      id: `${timestamp}-${Math.random().toString(36).substr(2, 9)}`, // ID mais único
       type: "chat",
       from: currentUsername,
       to: otherUsername,
       text: newMessage.trim(),
-      timestamp: Date.now(),
+      timestamp: timestamp,
       read: false
     };
 
+    // 1. Envia a mensagem real
     globalSocket.send(JSON.stringify(msgPayload));
-    setMessages(prev => [...prev, msgPayload]);
-    setNewMessage("");
-    onNewMessage();
-       globalSocket.send(JSON.stringify({ 
+
+    // 2. Avisa que parou de digitar (stop typing)
+    globalSocket.send(JSON.stringify({ 
       type: "typing", 
       status: "stop", 
       from: currentUsername, 
@@ -139,6 +150,7 @@ export function ChatWindow({ globalSocket, currentUsername, otherUsername, other
     
     if (myTypingTimeoutRef.current) clearTimeout(myTypingTimeoutRef.current);
 
+    // 3. Atualiza a tela localmente (Update Otimista) - APENAS UMA VEZ
     setMessages(prev => [...prev, msgPayload]);
     setNewMessage("");
     onNewMessage();
