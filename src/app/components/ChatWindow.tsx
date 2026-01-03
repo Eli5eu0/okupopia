@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef, useCallback } from "react";
+import { useEffect, useState, useRef } from "react";
 import { API_URL } from "../../../utils/supabase/info";
 import { ProfilePage } from "./ProfilePage";
 
@@ -9,6 +9,7 @@ interface Message {
   text: string;
   timestamp: number;
   read: boolean;
+  type?: "chat" | "typing"; // Diferenciar mensagens de eventos
 }
 
 interface ChatWindowProps {
@@ -19,149 +20,156 @@ interface ChatWindowProps {
   onNewMessage: () => void;
 }
 
-export function ChatWindow({
-  currentUsername,
-  otherUsername,
-  otherName,
-  onBack,
-  onNewMessage,
-}: ChatWindowProps) {
+export function ChatWindow({ currentUsername, otherUsername, otherName, onBack, onNewMessage }: ChatWindowProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [newMessage, setNewMessage] = useState("");
-  const [loading, setLoading] = useState(true);
-  const [sending, setSending] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [isOtherTyping, setIsOtherTyping] = useState(false);
   
-  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const socketRef = useRef<WebSocket | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const scrollToBottom = useCallback((behavior: ScrollBehavior = "smooth", force = false) => {
-    const container = scrollContainerRef.current;
-    if (!container || !messagesEndRef.current) return;
+  // Auxiliar para rolar para o fim
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  };
 
-    const isNearBottom = 
-      container.scrollHeight - container.scrollTop <= container.clientHeight + 150;
+  useEffect(() => {
+    scrollToBottom();
+  }, [messages, isOtherTyping]);
 
-    if (force || isNearBottom) {
-      messagesEndRef.current.scrollIntoView({ behavior });
-    }
-  }, []);
+  // 1. Gerenciamento do WebSocket
+  useEffect(() => {
+    const wsUrl = `${API_URL.replace(/^http/, 'ws')}/ws/${currentUsername}`;
 
-  const fetchMessages = useCallback(async (isInitial = false) => {
-    try {
-      const response = await fetch(`${API_URL}/inbox?username=${currentUsername}`);
-      
-      if (response.ok) {
-        const data = await response.json();
-        const conversationMessages = data.messages.filter(
-          (msg: Message) =>
-            (msg.from === currentUsername && msg.to === otherUsername) ||
-            (msg.from === otherUsername && msg.to === currentUsername)
-        );
-        
-        conversationMessages.sort((a: Message, b: Message) => a.timestamp - b.timestamp);
-        
-        // Evita re-renders se nada mudou
-        setMessages(prev => {
-          if (JSON.stringify(prev) === JSON.stringify(conversationMessages)) return prev;
-          
-          // Se o número de mensagens aumentou, rolar para baixo
-          if (conversationMessages.length > prev.length) {
-            setTimeout(() => scrollToBottom(isInitial ? "auto" : "smooth", true), 50);
-          }
-          return conversationMessages;
-        });
+    const socket = new WebSocket(wsUrl);
+    socketRef.current = socket;
 
-        const hasUnread = conversationMessages.some((m: Message) => !m.read && m.to === currentUsername);
-        if (hasUnread) {
-          const markRes = await fetch(`${API_URL}/mark-read`, {
+    socket.onmessage = (event) => {
+      const data = JSON.parse(event.data);
+
+      if (data.type === "typing") {
+        if (data.from === otherUsername) {
+          setIsOtherTyping(true);
+          if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+          typingTimeoutRef.current = setTimeout(() => setIsOtherTyping(false), 3000);
+        }
+      }  else if (data.type === "read_receipt") {
+        // NOVIDADE: Se recebi um aviso de leitura do outro usuário
+        if (data.from === otherUsername) {
+          setMessages(prev => prev.map(msg => ({
+            ...msg,
+            read: true // Marca todas como lidas instantaneamente na tela
+          })));
+        }
+      } else {
+        // É uma mensagem real - Adiciona apenas se vier do outro (evita duplicar o que o remetente já add localmente)
+        if (data.from === otherUsername) {
+          setMessages(prev => [...prev, data]);
+          onNewMessage();
+
+          fetch(`${API_URL}/make-server-aef9e41b/mark-read`, {
             method: "PUT",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ username: currentUsername, otherUser: otherUsername }),
+            body: JSON.stringify({ username: currentUsername, otherUser: otherUsername })
           });
-          if (markRes.ok) onNewMessage();
         }
       }
-    } catch (error) {
-      console.error("Error fetching messages:", error);
-    } finally {
-      setLoading(false);
-    }
-  }, [currentUsername, otherUsername, onNewMessage, scrollToBottom]);
-
-  // Polling de Mensagens e Digitação
-  useEffect(() => {
-    setLoading(true);
-    fetchMessages(true);
-
-    const checkTyping = async () => {
-      try {
-        const res = await fetch(`${API_URL}/typing-status?from=${otherUsername}&to=${currentUsername}`);
-        if (res.ok) {
-          const data = await res.json();
-          setIsOtherTyping(data.isTyping);
-        }
-      } catch (e) { setIsOtherTyping(false); }
     };
-
-    const msgInterval = setInterval(() => fetchMessages(false), 2500);
-    const typingInterval = setInterval(checkTyping, 2000);
 
     return () => {
-      clearInterval(msgInterval);
-      clearInterval(typingInterval);
+      socket.close();
       if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
     };
-  }, [otherUsername, fetchMessages]);
+  }, [currentUsername, otherUsername]);
 
-  const handleSendMessage = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newMessage.trim() || sending) return;
-
-    const text = newMessage.trim();
-    setSending(true);
-    setNewMessage(""); // Limpa o input imediatamente (Optimistic UI)
-
-    try {
-      const response = await fetch(`${API_URL}/send`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ from: currentUsername, to: otherUsername, text }),
-      });
-
-      if (response.ok) {
-        await fetchMessages();
-        onNewMessage();
+  // 2. Carregar Histórico Inicial
+  useEffect(() => {
+    const fetchHistory = async () => {
+      setLoading(true);
+      try {
+        const res = await fetch(`${API_URL}/inbox?username=${currentUsername}`);
+        if (res.ok) {
+          const data = await res.json();
+          const filtered = data.messages
+            .filter((msg: any) => 
+              (msg.from === currentUsername && msg.to === otherUsername) ||
+              (msg.from === otherUsername && msg.to === currentUsername)
+            )
+            .sort((a: any, b: any) => a.timestamp - b.timestamp);
+          setMessages(filtered);
+        }
+      } catch (e) {
+        console.error("Erro ao carregar histórico:", e);
+      } finally {
+        setLoading(false);
       }
-    } catch (error) {
-      console.error("Erro ao enviar:", error);
-    } finally {
-      setSending(false);
+    };
+    fetchHistory();
+  }, [otherUsername, currentUsername]);
+
+  // 3. Marcar como lida (Mark Read)
+  useEffect(() => {
+    const markAsRead = async () => {
+      try {
+        await fetch(`${API_URL}/mark-read`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            username: currentUsername,
+            otherUser: otherUsername
+          })
+        });
+        onNewMessage(); // Atualiza a lista lateral para zerar o badge
+      } catch (e) {
+        console.error("Erro ao marcar como lida:", e);
+      }
+    };
+
+    if (messages.length > 0) {
+      markAsRead();
     }
+  }, [otherUsername, currentUsername, messages.length]);
+
+  // 4. Enviar Mensagem
+  const handleSendMessage = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newMessage.trim() || !socketRef.current) return;
+
+    const timestamp = Date.now();
+    const id = `${timestamp}-${Math.random().toString(36).substr(2, 9)}`;
+
+    const msgPayload: Message = {
+      id: id,
+      type: "chat",
+      from: currentUsername,
+      to: otherUsername,
+      text: newMessage.trim(),
+      timestamp: timestamp,
+      read: false
+    };
+
+    socketRef.current.send(JSON.stringify(msgPayload));
+    setMessages(prev => [...prev, msgPayload]); // Atualização otimista local
+    setNewMessage("");
+    onNewMessage(); 
   };
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setNewMessage(e.target.value);
     
-    // Avisa o servidor que está digitando (Debounce)
-    if (!typingTimeoutRef.current) {
-      fetch(`${API_URL}/typing`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ from: currentUsername, to: otherUsername }),
-      }).catch(() => {});
+    if (socketRef.current?.readyState === WebSocket.OPEN) {
+      socketRef.current.send(JSON.stringify({
+        type: "typing",
+        to: otherUsername
+      }));
     }
-
-    if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
-    typingTimeoutRef.current = setTimeout(() => {
-      typingTimeoutRef.current = null;
-    }, 2000);
   };
 
-  const formatMessageTime = (timestamp: number) => {
-    return new Date(timestamp).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+  const formatMessageTime = (ts: number) => {
+    return new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   };
 
   return (
@@ -170,10 +178,11 @@ export function ChatWindow({
         <ProfilePage username={otherUsername} onClose={() => setShowProfile(false)} />
       ) : (
         <>
-          {/* Header */}
           <div className="bg-white border-b border-gray-200 p-4 flex items-center gap-3">
             <button onClick={onBack} className="text-gray-600 p-2 lg:hidden">
-              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M15 19l-7-7 7-7" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"/></svg>
+              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path d="M15 19l-7-7 7-7" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"/>
+              </svg>
             </button>
             <div onClick={() => setShowProfile(true)} className="flex items-center gap-3 cursor-pointer flex-1">
               <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-400 to-purple-500 flex items-center justify-center text-white font-bold">
@@ -186,25 +195,43 @@ export function ChatWindow({
             </div>
           </div>
 
-          {/* Messages */}
-          <div ref={scrollContainerRef} className="flex-1 overflow-y-auto p-4 space-y-4 scrollbar-thin">
+          <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-gray-50">
             {loading && messages.length === 0 ? (
               <div className="space-y-4 animate-pulse">
                 <div className="bg-gray-200 h-12 w-3/4 rounded-2xl"></div>
-                <div className="bg-gray-100 h-12 w-1/2 rounded-2xl ml-auto"></div>
+                <div className="bg-gray-200 h-12 w-1/2 rounded-2xl ml-auto"></div>
               </div>
             ) : messages.length === 0 ? (
-              <div className="h-full flex items-center justify-center text-gray-400 italic">Diga "Olá" para {otherName}!</div>
+              <div className="h-full flex items-center justify-center text-gray-400 italic">
+                Diga "Olá" para {otherName}!
+              </div>
             ) : (
               messages.map((msg) => {
                 const isOwn = msg.from === currentUsername;
                 return (
                   <div key={msg.id} className={`flex ${isOwn ? "justify-end" : "justify-start"}`}>
-                    <div className={`max-w-[75%] rounded-2xl px-4 py-2 shadow-sm ${isOwn ? "bg-gradient-to-r from-blue-500 to-purple-600 text-white" : "bg-white border text-gray-900"}`}>
+                    <div className={`max-w-[75%] rounded-2xl px-4 py-2 shadow-sm ${
+                      isOwn ? "bg-blue-600 text-white" : "bg-white border text-gray-900"
+                    }`}>
                       <p className="break-words">{msg.text}</p>
-                      <span className={`text-[10px] mt-1 block ${isOwn ? "text-blue-100 text-right" : "text-gray-400"}`}>
-                        {formatMessageTime(msg.timestamp)}
-                      </span>
+                      <div className="flex items-center justify-end gap-1 mt-1">
+                        <span className={`text-[10px] ${isOwn ? "text-blue-100" : "text-gray-400"}`}>
+                          {formatMessageTime(msg.timestamp)}
+                        </span>
+                        {isOwn && (
+                          <span className="text-[10px]">
+                            {msg.read ? (
+                              <svg className="w-3 h-3 text-blue-200 fill-current" viewBox="0 0 20 20">
+                                <path d="M19 6.7l-1.4-1.4-9.3 9.3-4.3-4.3-1.4 1.4 5.7 5.7zM14.7 6.7l-1.4-1.4-5 5 1.4 1.4z" />
+                              </svg>
+                            ) : (
+                              <svg className="w-3 h-3 text-blue-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path d="M5 13l4 4L19 7" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"/>
+                              </svg>
+                            )}
+                          </span>
+                        )}
+                      </div>
                     </div>
                   </div>
                 );
@@ -213,7 +240,7 @@ export function ChatWindow({
 
             {isOtherTyping && (
               <div className="flex justify-start">
-                <div className="bg-gray-100 rounded-2xl px-4 py-3 flex gap-1">
+                <div className="bg-white border rounded-2xl px-4 py-3 flex gap-1 shadow-sm">
                   <span className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce"></span>
                   <span className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce [animation-delay:0.2s]"></span>
                   <span className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce [animation-delay:0.4s]"></span>
@@ -223,7 +250,6 @@ export function ChatWindow({
             <div ref={messagesEndRef} />
           </div>
 
-          {/* Input */}
           <form onSubmit={handleSendMessage} className="p-4 border-t bg-white">
             <div className="flex gap-2">
               <input
@@ -231,10 +257,16 @@ export function ChatWindow({
                 value={newMessage}
                 onChange={handleInputChange}
                 placeholder="Digite uma mensagem..."
-                className="flex-1 px-4 py-2 border rounded-full focus:ring-2 focus:ring-blue-500 outline-none"
+                className="flex-1 px-4 py-2 border rounded-full focus:ring-2 focus:ring-blue-500 outline-none transition-all"
               />
-              <button type="submit" disabled={!newMessage.trim() || sending} className="bg-blue-600 text-white p-3 rounded-full disabled:opacity-50">
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"/></svg>
+              <button 
+                type="submit" 
+                disabled={!newMessage.trim()} 
+                className="bg-blue-600 text-white p-3 rounded-full disabled:opacity-50 hover:bg-blue-700 transition-colors"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"/>
+                </svg>
               </button>
             </div>
           </form>
