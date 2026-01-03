@@ -64,8 +64,11 @@ export function ConversationList({
   };
 
   useEffect(() => {
-    fetchConversations();
     fetchAllUsers();
+  }, [currentUsername]);
+
+  useEffect(() => {
+    fetchConversations();
   }, [currentUsername, refreshTrigger]);
 
   // Lógica para filtrar usuários que ainda não possuem conversa aberta

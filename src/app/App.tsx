@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { LoginScreen } from "./components/LoginScreen";
 import { ConversationList } from "./components/ConversationList";
 import { ChatWindow } from "./components/ChatWindow";
@@ -10,7 +10,14 @@ export default function App() {
   const [currentUser, setCurrentUser] = useState<{ username: string; name: string } | null>(null);
   const [selectedConversation, setSelectedConversation] = useState<{ username: string; name: string } | null>(null);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
-  const [totalUnread, setTotalUnread] = useState(0); // ESTADO ESSENCIAL ADICIONADO
+  const [socket, setSocket] = useState<WebSocket | null>(null);
+
+  // Referência para contornar o encerramento (closure) do useEffect do WebSocket
+  const selectedConvRef = useRef(selectedConversation);
+
+  useEffect(() => {
+    selectedConvRef.current = selectedConversation;
+  }, [selectedConversation]);
 
   const handleLogin = (username: string, name: string) => setCurrentUser({ username, name });
   const handleLogout = () => { setCurrentUser(null); setSelectedConversation(null); };
@@ -26,45 +33,48 @@ export default function App() {
 
   const handleNewMessage = () => setRefreshTrigger(prev => prev + 1);
 
-  // Monitoramento Global Inteligente
-useEffect(() => {
+  useEffect(() => {
     if (!currentUser) return;
 
-    const checkNewMessages = async () => {
-      try {
-        const res = await fetch(`${API_URL}/conversations?username=${currentUser.username}`);
-        if (!res.ok) return;
-        const data = await res.json();
-        const convs = data.conversations || [];
-        
-        const currentUnreadTotal = convs.reduce((acc: number, conv: any) => acc + (conv.unreadCount || 0), 0);
+    const wsUrl = `${API_URL.replace(/^http/, 'ws')}/ws/${currentUser.username}`;
+    const ws = new WebSocket(wsUrl);
 
-        // Se o total de não lidas aumentou, verificamos se devemos notificar
-        if (currentUnreadTotal > totalUnread) {
-          const incoming = convs.find((c: any) => c.unreadCount > 0);
-          
-          // SÓ notifica se NÃO for a conversa aberta no momento
-          if (incoming && incoming.username !== selectedConversation?.username) {
-            toast.info(`Mensagem de ${incoming.name}`, {
-              description: incoming.lastMessage?.text,
-              id: `msg-${incoming.username}`, // ID fixo evita empilhar vários toasts do mesmo usuário
+    ws.onmessage = async (event) => {
+      const data = JSON.parse(event.data);
+      
+      if (data.type === "chat") {
+        const currentOpenChat = selectedConvRef.current?.username;
+
+        if (currentOpenChat === data.from) {
+          // Chat aberto: Marcar como lido no servidor imediatamente
+          try {
+            await fetch(`${API_URL}/mark-read`, {
+              method: "PUT",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ 
+                username: currentUser.username, 
+                otherUser: data.from 
+              })
             });
-          }
+          } catch (e) { console.error(e); }
+        } else {
+          // Chat fechado: Mostrar notificação
+          toast.info(`Mensagem de ${data.name || data.from}`, { 
+            description: data.text,
+            id: `msg-${data.from}` 
+          });
         }
-        
-        // Atualiza estados e força re-render da lista lateral
-        setTotalUnread(currentUnreadTotal);
         setRefreshTrigger(prev => prev + 1);
-        
-      } catch (err) {
-        console.error("Erro no monitoramento:", err);
+      }
+
+      if (data.type === "read_receipt") {
+        setRefreshTrigger(prev => prev + 1);
       }
     };
 
-    // Polling de 5s para o App (Notificação) é mais lento que o Chat (2.5s)
-    const interval = setInterval(checkNewMessages, 5000);
-    return () => clearInterval(interval);
-  }, [currentUser?.username, totalUnread, selectedConversation?.username]);
+    setSocket(ws);
+    return () => ws.close();
+  }, [currentUser?.username]);
 
   if (!currentUser) return (
     <div className="min-h-screen w-full">
@@ -96,7 +106,8 @@ useEffect(() => {
               otherUsername={selectedConversation.username}
               otherName={selectedConversation.name}
               onBack={handleBackToList}
-              onNewMessage={handleNewMessage}
+              onNewMessage={handleNewMessage} 
+              globalSocket={socket}            
             />
           </div>
         ) : (

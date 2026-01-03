@@ -2,4 +2,4 @@
 
 export const projectId = "vhttrycflbbdvjhorgnw"
 export const publicAnonKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZodHRyeWNmbGJiZHZqaG9yZ253Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjcyMDAyNTAsImV4cCI6MjA4Mjc3NjI1MH0.f5zuRDPVzcVqilQaFer_c0QMi7i6weZFMmdN_WiEeng"
-export const API_URL = "http://localhost:8000/make-server-aef9e41b"
+export const API_URL = "http://172.20.10.2:8000/make-server-aef9e41b"

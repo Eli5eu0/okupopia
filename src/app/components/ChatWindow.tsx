@@ -9,7 +9,8 @@ interface Message {
   text: string;
   timestamp: number;
   read: boolean;
-  type?: "chat" | "typing"; // Diferenciar mensagens de eventos
+  type?: "chat" | "typing" | "read_receipt";
+  status?: "start" | "stop";
 }
 
 interface ChatWindowProps {
@@ -18,20 +19,20 @@ interface ChatWindowProps {
   otherName: string;
   onBack: () => void;
   onNewMessage: () => void;
+  globalSocket: WebSocket | null;
 }
 
-export function ChatWindow({ currentUsername, otherUsername, otherName, onBack, onNewMessage }: ChatWindowProps) {
+export function ChatWindow({ globalSocket, currentUsername, otherUsername, otherName, onBack, onNewMessage }: ChatWindowProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [newMessage, setNewMessage] = useState("");
   const [showProfile, setShowProfile] = useState(false);
   const [loading, setLoading] = useState(true);
   const [isOtherTyping, setIsOtherTyping] = useState(false);
   
-  const socketRef = useRef<WebSocket | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const myTypingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Auxiliar para rolar para o fim
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   };
@@ -40,52 +41,42 @@ export function ChatWindow({ currentUsername, otherUsername, otherName, onBack, 
     scrollToBottom();
   }, [messages, isOtherTyping]);
 
-  // 1. Gerenciamento do WebSocket
   useEffect(() => {
-    const wsUrl = `${API_URL.replace(/^http/, 'ws')}/ws/${currentUsername}`;
+    if (!globalSocket) return;
 
-    const socket = new WebSocket(wsUrl);
-    socketRef.current = socket;
-
-    socket.onmessage = (event) => {
+    const handleSocketMessage = (event: MessageEvent) => {
       const data = JSON.parse(event.data);
 
+      if (data.from !== otherUsername && data.to !== otherUsername) return;
+
       if (data.type === "typing") {
-        if (data.from === otherUsername) {
+        if (data.status === "stop") {
+          setIsOtherTyping(false);
+          if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+        } else {
           setIsOtherTyping(true);
           if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
           typingTimeoutRef.current = setTimeout(() => setIsOtherTyping(false), 3000);
         }
-      }  else if (data.type === "read_receipt") {
-        // NOVIDADE: Se recebi um aviso de leitura do outro usuário
-        if (data.from === otherUsername) {
-          setMessages(prev => prev.map(msg => ({
-            ...msg,
-            read: true // Marca todas como lidas instantaneamente na tela
-          })));
-        }
-      } else {
-        // É uma mensagem real - Adiciona apenas se vier do outro (evita duplicar o que o remetente já add localmente)
+      } 
+      else if (data.type === "read_receipt") {
+        setMessages(prev => prev.map(msg => ({ ...msg, read: true })));
+      } 
+      else if (data.type === "chat") {
         if (data.from === otherUsername) {
           setMessages(prev => [...prev, data]);
-          onNewMessage();
-
-          fetch(`${API_URL}/make-server-aef9e41b/mark-read`, {
-            method: "PUT",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ username: currentUsername, otherUser: otherUsername })
-          });
+          onNewMessage(); 
         }
       }
     };
 
+    globalSocket.addEventListener("message", handleSocketMessage);
     return () => {
-      socket.close();
+      globalSocket.removeEventListener("message", handleSocketMessage);
       if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
     };
-  }, [currentUsername, otherUsername]);
+  }, [globalSocket, otherUsername, currentUsername]);
 
-  // 2. Carregar Histórico Inicial
   useEffect(() => {
     const fetchHistory = async () => {
       setLoading(true);
@@ -101,70 +92,84 @@ export function ChatWindow({ currentUsername, otherUsername, otherName, onBack, 
             .sort((a: any, b: any) => a.timestamp - b.timestamp);
           setMessages(filtered);
         }
-      } catch (e) {
-        console.error("Erro ao carregar histórico:", e);
-      } finally {
-        setLoading(false);
-      }
+      } catch (e) { console.error(e); } finally { setLoading(false); }
     };
     fetchHistory();
   }, [otherUsername, currentUsername]);
 
-  // 3. Marcar como lida (Mark Read)
   useEffect(() => {
-    const markAsRead = async () => {
+    const clearUnread = async () => {
       try {
         await fetch(`${API_URL}/mark-read`, {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            username: currentUsername,
-            otherUser: otherUsername
-          })
+          body: JSON.stringify({ username: currentUsername, otherUser: otherUsername })
         });
-        onNewMessage(); // Atualiza a lista lateral para zerar o badge
-      } catch (e) {
-        console.error("Erro ao marcar como lida:", e);
-      }
+        onNewMessage(); 
+      } catch (e) { console.error(e); }
     };
+    clearUnread();
+  }, [otherUsername]);
 
-    if (messages.length > 0) {
-      markAsRead();
-    }
-  }, [otherUsername, currentUsername, messages.length]);
-
-  // 4. Enviar Mensagem
   const handleSendMessage = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newMessage.trim() || !socketRef.current) return;
-
-    const timestamp = Date.now();
-    const id = `${timestamp}-${Math.random().toString(36).substr(2, 9)}`;
+    // if (!newMessage.trim() || !globalSocket) return;
+    if (!newMessage.trim() || !globalSocket || globalSocket.readyState !== WebSocket.OPEN) return;
 
     const msgPayload: Message = {
-      id: id,
+      id: `${Date.now()}`,
       type: "chat",
       from: currentUsername,
       to: otherUsername,
       text: newMessage.trim(),
-      timestamp: timestamp,
+      timestamp: Date.now(),
       read: false
     };
 
-    socketRef.current.send(JSON.stringify(msgPayload));
-    setMessages(prev => [...prev, msgPayload]); // Atualização otimista local
+    globalSocket.send(JSON.stringify(msgPayload));
+    setMessages(prev => [...prev, msgPayload]);
     setNewMessage("");
-    onNewMessage(); 
+    onNewMessage();
+       globalSocket.send(JSON.stringify({ 
+      type: "typing", 
+      status: "stop", 
+      from: currentUsername, 
+      to: otherUsername 
+    }));
+    
+    if (myTypingTimeoutRef.current) clearTimeout(myTypingTimeoutRef.current);
+
+    setMessages(prev => [...prev, msgPayload]);
+    setNewMessage("");
+    onNewMessage();
   };
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setNewMessage(e.target.value);
-    
-    if (socketRef.current?.readyState === WebSocket.OPEN) {
-      socketRef.current.send(JSON.stringify({
-        type: "typing",
-        to: otherUsername
-      }));
+    const value = e.target.value;
+    setNewMessage(value);
+
+    if (globalSocket?.readyState === WebSocket.OPEN) {
+      if (value.trim() === "") {
+        globalSocket.send(JSON.stringify({ 
+          type: "typing", 
+          status: "stop", 
+          from: currentUsername, 
+          to: otherUsername 
+        }));
+        if (myTypingTimeoutRef.current) clearTimeout(myTypingTimeoutRef.current);
+      } else {
+        globalSocket.send(JSON.stringify({ 
+          type: "typing", 
+          status: "start", 
+          from: currentUsername, 
+          to: otherUsername 
+        }));
+
+        if (myTypingTimeoutRef.current) clearTimeout(myTypingTimeoutRef.current);
+        myTypingTimeoutRef.current = setTimeout(() => {
+          globalSocket.send(JSON.stringify({ type: "typing", status: "stop", from: currentUsername, to: otherUsername }));
+        }, 2000);
+      }
     }
   };
 
@@ -178,16 +183,13 @@ export function ChatWindow({ currentUsername, otherUsername, otherName, onBack, 
         <ProfilePage username={otherUsername} onClose={() => setShowProfile(false)} />
       ) : (
         <>
+          {/* Header */}
           <div className="bg-white border-b border-gray-200 p-4 flex items-center gap-3">
             <button onClick={onBack} className="text-gray-600 p-2 lg:hidden">
-              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path d="M15 19l-7-7 7-7" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"/>
-              </svg>
+              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M15 19l-7-7 7-7" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"/></svg>
             </button>
             <div onClick={() => setShowProfile(true)} className="flex items-center gap-3 cursor-pointer flex-1">
-              <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-400 to-purple-500 flex items-center justify-center text-white font-bold">
-                {otherName[0].toUpperCase()}
-              </div>
+              <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-400 to-purple-500 flex items-center justify-center text-white font-bold">{otherName[0].toUpperCase()}</div>
               <div>
                 <h2 className="text-gray-900 font-medium">{otherName}</h2>
                 <p className="text-sm text-gray-500">@{otherUsername}</p>
@@ -195,6 +197,7 @@ export function ChatWindow({ currentUsername, otherUsername, otherName, onBack, 
             </div>
           </div>
 
+          {/* Messages Area */}
           <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-gray-50">
             {loading && messages.length === 0 ? (
               <div className="space-y-4 animate-pulse">
@@ -202,32 +205,22 @@ export function ChatWindow({ currentUsername, otherUsername, otherName, onBack, 
                 <div className="bg-gray-200 h-12 w-1/2 rounded-2xl ml-auto"></div>
               </div>
             ) : messages.length === 0 ? (
-              <div className="h-full flex items-center justify-center text-gray-400 italic">
-                Diga "Olá" para {otherName}!
-              </div>
+              <div className="h-full flex items-center justify-center text-gray-400 italic">Diga "Olá" para {otherName}!</div>
             ) : (
               messages.map((msg) => {
                 const isOwn = msg.from === currentUsername;
                 return (
                   <div key={msg.id} className={`flex ${isOwn ? "justify-end" : "justify-start"}`}>
-                    <div className={`max-w-[75%] rounded-2xl px-4 py-2 shadow-sm ${
-                      isOwn ? "bg-blue-600 text-white" : "bg-white border text-gray-900"
-                    }`}>
+                    <div className={`max-w-[75%] rounded-2xl px-4 py-2 shadow-sm ${isOwn ? "bg-blue-600 text-white" : "bg-white border text-gray-900"}`}>
                       <p className="break-words">{msg.text}</p>
                       <div className="flex items-center justify-end gap-1 mt-1">
-                        <span className={`text-[10px] ${isOwn ? "text-blue-100" : "text-gray-400"}`}>
-                          {formatMessageTime(msg.timestamp)}
-                        </span>
+                        <span className={`text-[10px] ${isOwn ? "text-blue-100" : "text-gray-400"}`}>{formatMessageTime(msg.timestamp)}</span>
                         {isOwn && (
                           <span className="text-[10px]">
                             {msg.read ? (
-                              <svg className="w-3 h-3 text-blue-200 fill-current" viewBox="0 0 20 20">
-                                <path d="M19 6.7l-1.4-1.4-9.3 9.3-4.3-4.3-1.4 1.4 5.7 5.7zM14.7 6.7l-1.4-1.4-5 5 1.4 1.4z" />
-                              </svg>
+                              <svg className="w-3 h-3 text-blue-200 fill-current" viewBox="0 0 20 20"><path d="M19 6.7l-1.4-1.4-9.3 9.3-4.3-4.3-1.4 1.4 5.7 5.7zM14.7 6.7l-1.4-1.4-5 5 1.4 1.4z" /></svg>
                             ) : (
-                              <svg className="w-3 h-3 text-blue-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path d="M5 13l4 4L19 7" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"/>
-                              </svg>
+                              <svg className="w-3 h-3 text-blue-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M5 13l4 4L19 7" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"/></svg>
                             )}
                           </span>
                         )}
@@ -237,7 +230,6 @@ export function ChatWindow({ currentUsername, otherUsername, otherName, onBack, 
                 );
               })
             )}
-
             {isOtherTyping && (
               <div className="flex justify-start">
                 <div className="bg-white border rounded-2xl px-4 py-3 flex gap-1 shadow-sm">
@@ -250,6 +242,7 @@ export function ChatWindow({ currentUsername, otherUsername, otherName, onBack, 
             <div ref={messagesEndRef} />
           </div>
 
+          {/* Input Form */}
           <form onSubmit={handleSendMessage} className="p-4 border-t bg-white">
             <div className="flex gap-2">
               <input
@@ -259,14 +252,8 @@ export function ChatWindow({ currentUsername, otherUsername, otherName, onBack, 
                 placeholder="Digite uma mensagem..."
                 className="flex-1 px-4 py-2 border rounded-full focus:ring-2 focus:ring-blue-500 outline-none transition-all"
               />
-              <button 
-                type="submit" 
-                disabled={!newMessage.trim()} 
-                className="bg-blue-600 text-white p-3 rounded-full disabled:opacity-50 hover:bg-blue-700 transition-colors"
-              >
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"/>
-                </svg>
+              <button type="submit" disabled={!newMessage.trim()} className="bg-blue-600 text-white p-3 rounded-full disabled:opacity-50 hover:bg-blue-700 transition-colors">
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"/></svg>
               </button>
             </div>
           </form>
