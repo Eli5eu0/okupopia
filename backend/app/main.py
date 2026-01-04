@@ -181,7 +181,7 @@ async def get_nodes():
     # Resetar contadores
     for node in chord_nodes:
         node.users = []
-        node.message_count = 0
+        node.messageCount = 0
 
     # Distribuir usuários e contar mensagens por nó responsável
     for user in users:
@@ -197,9 +197,42 @@ async def get_nodes():
         if resp:
             for n in chord_nodes:
                 if n.id == resp.id:
-                    n.message_count += 1
+                    n.messageCount += 1
     
     return {"nodes": [n.dict() for n in chord_nodes]}
+
+@api_router.get("/admin/distribution")
+async def get_distribution():
+    try:
+        all_users = await kv.get_by_prefix("user:")
+        distribution = {}
+
+        for user in all_users:
+            username = user['username']
+            user_key = f"user:{username}"
+            
+            # 1. Encontra o nó primário (Responsável)
+            primary = chord.find_responsible_node(user_key, chord_nodes)
+            
+            # 2. Encontra as réplicas (Próximos nós ativos no anel)
+            # Pegamos 3 réplicas (o primário costuma ser a primeira)
+            replicas = chord.get_replica_nodes(user_key, chord_nodes, count=3)
+            
+            # 3. Calcula a posição exata no anel (0-255)
+            chord_pos = chord.get_chord_position(user_key)
+            
+            distribution[username] = {
+                "name": user['name'],
+                "primaryNode": primary.name if primary else "Offline",
+                "primaryNodeId": primary.id if primary else None,
+                "replicaNodes": [r.name for r in replicas if r.id != (primary.id if primary else None)],
+                "chordPosition": chord_pos
+            }
+
+        return {"distribution": distribution}
+    except Exception as e:
+        print(f"❌ Erro ao calcular distribuição: {e}")
+        raise HTTPException(status_code=500, detail=f"Erro interno: {str(e)}")
 
 @api_router.post("/admin/nodes/{node_id}/toggle")
 async def toggle_node(node_id: int = Path(...)):

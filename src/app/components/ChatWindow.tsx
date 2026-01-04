@@ -88,6 +88,23 @@ export function ChatWindow({ globalSocket, currentUsername, otherUsername, other
   }, [globalSocket, otherUsername, currentUsername]);
 
   useEffect(() => {
+    const handleResize = () => {
+      if (window.visualViewport) {
+        // Ajusta o scroll para garantir que o input não fique escondido
+        if (document.activeElement?.tagName === 'INPUT') {
+          window.scrollTo(0, 0);
+          setTimeout(() => {
+            scrollToBottom(); // Garante que a última mensagem apareça
+          }, 100);
+        }
+      }
+    };
+
+    window.visualViewport?.addEventListener('resize', handleResize);
+    return () => window.visualViewport?.removeEventListener('resize', handleResize);
+  }, []);
+
+  useEffect(() => {
     const fetchHistory = async () => {
       setLoading(true);
       try {
@@ -190,13 +207,13 @@ export function ChatWindow({ globalSocket, currentUsername, otherUsername, other
   };
 
   return (
-    <div className="flex flex-col h-full bg-white">
+    <div className="flex flex-col h-full w-full bg-white overflow-hidden relative">
       {showProfile ? (
         <ProfilePage username={otherUsername} onClose={() => setShowProfile(false)} />
       ) : (
         <>
           {/* Header */}
-          <div className="bg-white border-b border-gray-200 p-4 flex items-center gap-3">
+          <div className="flex-none bg-white border-b border-gray-200 p-4 flex items-center gap-3">
             <button onClick={onBack} className="text-gray-600 p-2 lg:hidden">
               <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M15 19l-7-7 7-7" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"/></svg>
             </button>
@@ -223,7 +240,7 @@ export function ChatWindow({ globalSocket, currentUsername, otherUsername, other
                 const isOwn = msg.from === currentUsername;
                 return (
                   <div key={msg.id} className={`flex ${isOwn ? "justify-end" : "justify-start"}`}>
-                    <div className={`max-w-[75%] rounded-2xl px-4 py-2 shadow-sm ${isOwn ? "bg-blue-600 text-white" : "bg-white border text-gray-900"}`}>
+                    <div className={`max-w-[75%] rounded-2xl px-4 py-2 shadow-sm ${isOwn ? "bg-gradient-to-r from-blue-500 to-purple-600 text-white" : "bg-white border text-gray-900"}`}>
                       <p className="break-words">{msg.text}</p>
                       <div className="flex items-center justify-end gap-1 mt-1">
                         <span className={`text-[10px] ${isOwn ? "text-blue-100" : "text-gray-400"}`}>{formatMessageTime(msg.timestamp)}</span>
@@ -264,7 +281,7 @@ export function ChatWindow({ globalSocket, currentUsername, otherUsername, other
                 placeholder="Digite uma mensagem..."
                 className="flex-1 px-4 py-2 border rounded-full focus:ring-2 focus:ring-blue-500 outline-none transition-all"
               />
-              <button type="submit" disabled={!newMessage.trim()} className="bg-blue-600 text-white p-3 rounded-full disabled:opacity-50 hover:bg-blue-700 transition-colors">
+              <button type="submit" disabled={!newMessage.trim()} className="bg-gradient-to-r from-blue-500 to-purple-600 text-white p-3 rounded-full disabled:opacity-50 hover:bg-blue-700 transition-colors">
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"/></svg>
               </button>
             </div>

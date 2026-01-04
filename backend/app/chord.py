@@ -7,12 +7,9 @@ class ChordNode(BaseModel):
     name: str
     active: bool
     users: List[str] = []
-    message_count: int = 0
+    messageCount: int = 0
 
 def hash_string(string: str) -> int:
-    """
-    Implementação idêntica ao hash de 32 bits do JS para manter compatibilidade.
-    """
     hash_val = 0
     for char in string:
         char_code = ord(char)

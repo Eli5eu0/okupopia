@@ -84,7 +84,7 @@ export default function App() {
   );
 
   return (
-    <div className="h-screen w-screen flex bg-gray-100 overflow-hidden fixed inset-0">
+    <div className="flex h-[100dvh] w-full bg-gray-100 overflow-hidden">
       <Toaster position="top-right" richColors closeButton />
       
       <div className={`${selectedConversation ? "hidden lg:flex" : "flex"} w-full lg:w-[400px] h-full flex-col border-r border-gray-200 bg-white flex-shrink-0`}>

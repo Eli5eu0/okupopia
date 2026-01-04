@@ -4,12 +4,36 @@
     <head>
       <meta charset="UTF-8" />
       <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-      <title>Chat Inbox System</title>
+      <meta name="mobile-web-app-capable" content="yes">
+      <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+      <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+      <title>Okupopia-Chat</title>
     </head>
 
     <body translate="no">
       <div id="root"></div>
       <script type="module" src="/src/main.tsx"></script>
+
+      <script>
+        if (window.visualViewport) {
+          const root = document.getElementById('root');
+          
+          window.visualViewport.addEventListener('resize', () => {
+            const isLoginScreen = document.querySelector('form')?.innerText.includes('Entrar') || 
+                                  document.querySelector('form')?.innerText.includes('Conta');
+
+            if (!isLoginScreen) {
+              root.style.height = window.visualViewport.height + 'px';
+            } else {
+              root.style.height = '100dvh';
+            }
+            
+            const isFormScreen = document.querySelector('form') || activeTab !== 'info';
+
+            window.scrollTo(0, 0);
+          });
+        }
+      </script>
     </body>
   </html>
   

@@ -34,25 +34,25 @@ export function ProfilePage({ username, onClose, onLogout }: ProfilePageProps) {
   const [activeTab, setActiveTab] = useState<"info" | "edit" | "security" | "settings">("info");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  
+
   // Check if viewing own profile
   const isOwnProfile = !!onLogout;
-  
+
   // Edit form state
   const [editName, setEditName] = useState("");
   const [editBio, setEditBio] = useState("");
   const [editStatus, setEditStatus] = useState("online");
-  
+
   // Security form state
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
-  
+
   // Settings state
   const [editTheme, setEditTheme] = useState("light");
   const [editNotifications, setEditNotifications] = useState(true);
   const [editPrivacy, setEditPrivacy] = useState("public");
-  
+
   // Delete account state
   const [deletePassword, setDeletePassword] = useState("");
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -72,7 +72,7 @@ export function ProfilePage({ username, onClose, onLogout }: ProfilePageProps) {
         const data = await res.json();
         setProfile(data.profile);
         setStatistics(data.statistics);
-        
+
         // Initialize form fields
         setEditName(data.profile.name);
         setEditBio(data.profile.bio);
@@ -95,7 +95,7 @@ export function ProfilePage({ username, onClose, onLogout }: ProfilePageProps) {
   const updateProfile = async () => {
     setSaving(true);
     setMessage(null);
-    
+
     try {
       const res = await fetch(
         `https://${projectId}.supabase.co/functions/v1/make-server-aef9e41b/profile/${username}`,
@@ -222,7 +222,7 @@ export function ProfilePage({ username, onClose, onLogout }: ProfilePageProps) {
 
       if (res.ok) {
         setMessage({ type: "success", text: "Conta excluída com sucesso" });
-        setTimeout(() => onLogout(), 2000);
+        setTimeout(() => onLogout?.(), 2000);
       } else {
         const data = await res.json();
         setMessage({ type: "error", text: data.error || "Erro ao excluir conta" });
@@ -257,14 +257,14 @@ export function ProfilePage({ username, onClose, onLogout }: ProfilePageProps) {
 
   if (loading || !profile || !statistics) {
     return (
-      <div className="h-full flex items-center justify-center bg-gray-50">
-        <div className="text-gray-500">Carregando perfil...</div>
+      <div className="w-full flex items-center justify-center bg-gray-50">
+        <div className="text-xs text-gray-500">Carregando perfil...</div>
       </div>
     );
   }
 
   return (
-    <div className="h-full flex flex-col bg-gray-50">
+    <div className="fixed inset-0 z-50 flex flex-col bg-gray-50 h-[100dvh]">
       {/* Header with cover */}
       <div className="relative">
         <div className="h-32 sm:h-48 bg-gradient-to-r from-blue-500 via-purple-500 to-pink-500" />
@@ -276,7 +276,7 @@ export function ProfilePage({ username, onClose, onLogout }: ProfilePageProps) {
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
           </svg>
         </button>
-        
+
         {/* Avatar */}
         <div className="absolute -bottom-12 sm:-bottom-16 left-4 sm:left-8">
           <div className="w-24 h-24 sm:w-32 sm:h-32 rounded-full bg-gray-50 p-1.5 sm:p-2 shadow-xl">
@@ -288,22 +288,22 @@ export function ProfilePage({ username, onClose, onLogout }: ProfilePageProps) {
       </div>
 
       {/* Profile header info */}
-      <div className="px-4 sm:px-8 pt-16 sm:pt-20 pb-4 bg-white border-b border-gray-200">
+      <div className="px-4 sm:px-8 pt-12 sm:pt-20 pb-4 bg-white border-b border-gray-200">
         <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
           <div className="flex-1">
             <h1 className="text-2xl sm:text-3xl text-gray-900 mb-1">{profile.name}</h1>
             <p className="text-base sm:text-lg text-gray-600 mb-2">@{profile.username}</p>
+            
             {profile.bio && <p className="text-sm sm:text-base text-gray-700 max-w-2xl">{profile.bio}</p>}
           </div>
           <div className="flex items-center gap-2">
             <span
-              className={`px-3 py-1.5 rounded-full text-xs sm:text-sm font-medium ${
-                profile.status === "online"
+              className={`px-3 py-1.5 rounded-full text-xs sm:text-sm font-medium ${profile.status === "online"
                   ? "bg-green-100 text-green-700"
                   : profile.status === "away"
-                  ? "bg-yellow-100 text-yellow-700"
-                  : "bg-gray-100 text-gray-700"
-              }`}
+                    ? "bg-yellow-100 text-yellow-700"
+                    : "bg-gray-100 text-gray-700"
+                }`}
             >
               {profile.status === "online" ? "🟢 Online" : profile.status === "away" ? "🟡 Ausente" : "⚫ Offline"}
             </span>
@@ -332,15 +332,14 @@ export function ProfilePage({ username, onClose, onLogout }: ProfilePageProps) {
       </div>
 
       {/* Tabs - Scrollable on mobile */}
-      <div className="bg-white border-b border-gray-200 overflow-x-auto">
+      <div className="bg-white border-b border-gray-200 overflow-x-auto flex-none scrollbar-hide">
         <div className="flex px-4 sm:px-8 min-w-max">
           <button
             onClick={() => setActiveTab("info")}
-            className={`px-4 sm:px-6 py-3 whitespace-nowrap transition-colors text-sm sm:text-base ${
-              activeTab === "info"
+            className={`px-4 sm:px-6 py-3 whitespace-nowrap transition-colors text-sm sm:text-base ${activeTab === "info"
                 ? "border-b-2 border-blue-500 text-blue-600 font-medium"
                 : "text-gray-600 hover:text-gray-800"
-            }`}
+              }`}
           >
             Informações
           </button>
@@ -348,31 +347,28 @@ export function ProfilePage({ username, onClose, onLogout }: ProfilePageProps) {
             <>
               <button
                 onClick={() => setActiveTab("edit")}
-                className={`px-4 sm:px-6 py-3 whitespace-nowrap transition-colors text-sm sm:text-base ${
-                  activeTab === "edit"
+                className={`px-4 sm:px-6 py-3 whitespace-nowrap transition-colors text-sm sm:text-base ${activeTab === "edit"
                     ? "border-b-2 border-blue-500 text-blue-600 font-medium"
                     : "text-gray-600 hover:text-gray-800"
-                }`}
+                  }`}
               >
                 Editar Perfil
               </button>
               <button
                 onClick={() => setActiveTab("security")}
-                className={`px-4 sm:px-6 py-3 whitespace-nowrap transition-colors text-sm sm:text-base ${
-                  activeTab === "security"
+                className={`px-4 sm:px-6 py-3 whitespace-nowrap transition-colors text-sm sm:text-base ${activeTab === "security"
                     ? "border-b-2 border-blue-500 text-blue-600 font-medium"
                     : "text-gray-600 hover:text-gray-800"
-                }`}
+                  }`}
               >
                 Segurança
               </button>
               <button
                 onClick={() => setActiveTab("settings")}
-                className={`px-4 sm:px-6 py-3 whitespace-nowrap transition-colors text-sm sm:text-base ${
-                  activeTab === "settings"
+                className={`px-4 sm:px-6 py-3 whitespace-nowrap transition-colors text-sm sm:text-base ${activeTab === "settings"
                     ? "border-b-2 border-blue-500 text-blue-600 font-medium"
                     : "text-gray-600 hover:text-gray-800"
-                }`}
+                  }`}
               >
                 Configurações
               </button>
@@ -382,12 +378,11 @@ export function ProfilePage({ username, onClose, onLogout }: ProfilePageProps) {
       </div>
 
       {/* Content - Scrollable */}
-      <div className="flex-1 overflow-y-auto bg-gray-50 p-4 sm:p-8">
+      <div className="flex-1 overflow-y-auto bg-gray-50 p-4 sm:p-8 pb-10">
         {message && (
           <div
-            className={`mb-4 p-4 rounded-lg ${
-              message.type === "success" ? "bg-green-50 text-green-700" : "bg-red-50 text-red-700"
-            }`}
+            className={`mb-4 p-4 rounded-lg ${message.type === "success" ? "bg-green-50 text-green-700" : "bg-red-50 text-red-700"
+              }`}
           >
             {message.text}
           </div>
@@ -439,12 +434,24 @@ export function ProfilePage({ username, onClose, onLogout }: ProfilePageProps) {
                 </div>
               </div>
             </div>
+
+            {isOwnProfile && (
+              <button
+                onClick={onLogout}
+                className="w-full mt-6 flex items-center justify-center gap-2 p-4 bg-white border border-red-200 text-red-600 rounded-xl hover:bg-red-50 transition-colors font-medium shadow-sm"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+                </svg>
+                Sair da Conta
+              </button>
+            )}
           </div>
         )}
 
         {/* Edit Tab */}
         {activeTab === "edit" && (
-          <div className="space-y-4 sm:space-y-6 max-w-2xl">
+          <div className="space-y-4 sm:space-y-6 w-full">
             <div>
               <label className="block text-sm sm:text-base text-gray-700 mb-2">Nome completo</label>
               <input
@@ -492,7 +499,7 @@ export function ProfilePage({ username, onClose, onLogout }: ProfilePageProps) {
 
         {/* Security Tab */}
         {activeTab === "security" && (
-          <div className="space-y-4 sm:space-y-6 max-w-2xl">
+          <div className="space-y-4 sm:space-y-6 w-full">
             <div>
               <h3 className="text-lg sm:text-xl text-gray-900 mb-3 sm:mb-4">Alterar Senha</h3>
               <div className="space-y-4">
@@ -580,7 +587,7 @@ export function ProfilePage({ username, onClose, onLogout }: ProfilePageProps) {
 
         {/* Settings Tab */}
         {activeTab === "settings" && (
-          <div className="space-y-4 sm:space-y-6 max-w-2xl">
+          <div className="space-y-4 sm:space-y-6 w-full">
             <div>
               <label className="block text-sm sm:text-base text-gray-700 mb-2">Tema</label>
               <select
@@ -614,14 +621,12 @@ export function ProfilePage({ username, onClose, onLogout }: ProfilePageProps) {
               </div>
               <button
                 onClick={() => setEditNotifications(!editNotifications)}
-                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors flex-shrink-0 ${
-                  editNotifications ? "bg-blue-600" : "bg-gray-300"
-                }`}
+                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors flex-shrink-0 ${editNotifications ? "bg-blue-600" : "bg-gray-300"
+                  }`}
               >
                 <span
-                  className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-                    editNotifications ? "translate-x-6" : "translate-x-1"
-                  }`}
+                  className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${editNotifications ? "translate-x-6" : "translate-x-1"
+                    }`}
                 />
               </button>
             </div>
