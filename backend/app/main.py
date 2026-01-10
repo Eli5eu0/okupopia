@@ -102,7 +102,11 @@ async def signin(data: dict = Body(...)):
 @api_router.get("/inbox")
 async def get_inbox(username: str = Query(...)):
     all_msgs = await kv.get_by_prefix("message:")
-    user_msgs = [m for m in all_msgs if m["to"] == username or m["from"] == username]
+    # Ignorar mensagens deletadas pelo usuário
+    user_msgs = [
+        m for m in all_msgs 
+        if (m["to"] == username or m["from"] == username) and username not in m.get("deleted_for", [])
+    ]
     user_msgs.sort(key=lambda x: x["timestamp"], reverse=True)
     return {"messages": user_msgs}
 
@@ -119,12 +123,14 @@ async def get_users(username: str = Query(None)):
 @api_router.get("/conversations")
 async def get_conversations(username: str = Query(...)):
     all_messages = await kv.get_by_prefix("message:")
-    # Filtra mensagens onde o usuário participa
-    user_messages = [m for m in all_messages if m["to"] == username or m["from"] == username]
+    # Filtra mensagens onde o usuário participa e que não foram deletadas por ele
+    user_messages = [
+        m for m in all_messages 
+        if (m["to"] == username or m["from"] == username) and username not in m.get("deleted_for", [])
+    ]
     
     conversations = {}
     for msg in user_messages:
-        # Identifica quem é a outra pessoa na conversa
         partner = msg["from"] if msg["to"] == username else msg["to"]
         
         if partner not in conversations:
@@ -134,24 +140,21 @@ async def get_conversations(username: str = Query(...)):
                 "unreadCount": 0
             }
         
-        # Atualiza para a mensagem mais recente
         if msg["timestamp"] > conversations[partner]["lastMessage"]["timestamp"]:
             conversations[partner]["lastMessage"] = msg
             
-        # Conta não lidas (se a mensagem foi PARA o usuário logado)
         if msg["to"] == username and not msg.get("read", False):
             conversations[partner]["unreadCount"] += 1
 
-    # Adiciona o nome real do parceiro buscando no banco de usuários
     result = []
     for partner, conv in conversations.items():
         user_info = await kv.get(f"user:{partner}")
         if user_info:
             result.append({**conv, "name": user_info["name"]})
-            
-    # Ordena por data da última mensagem
+
     result.sort(key=lambda x: x["lastMessage"]["timestamp"], reverse=True)
     return {"conversations": result}
+
     
 @api_router.put("/mark-read")
 async def mark_read(data: dict = Body(...)):
@@ -171,6 +174,38 @@ async def mark_read(data: dict = Body(...)):
     }, other_user) # Envia para remetente
             
     return {"success": True}
+
+@api_router.delete("/messages/{message_id}")
+async def delete_message(
+    message_id: str,
+    username: str = Query(...),       # usuário que está pedindo a deleção
+    delete_for_all: bool = Query(False)  # se true, apaga para todos
+):
+    """
+    Deleta uma mensagem. 
+    - delete_for_all só pode ser feito pelo emissor.
+    - delete_for_all = False remove apenas para o usuário logado.
+    """
+    msg = await kv.get(f"message:{message_id}")
+    if not msg:
+        raise HTTPException(status_code=404, detail="Mensagem não encontrada")
+
+    # Se o usuário pediu apagar para todos, mas não é o emissor
+    if delete_for_all and msg["from"] != username:
+        raise HTTPException(status_code=403, detail="Apenas o emissor pode apagar para todos")
+
+    if delete_for_all:
+        # Apaga completamente
+        await kv.delete(f"message:{message_id}")
+    else:
+        # Apaga só para o usuário
+        if "deleted_for" not in msg:
+            msg["deleted_for"] = []
+        if username not in msg["deleted_for"]:
+            msg["deleted_for"].append(username)
+        await kv.set(f"message:{message_id}", msg)
+
+    return {"success": True, "message": "Mensagem deletada"}
 
 # --- ADMIN & CHORD VISUALIZATION (Usando api_router) ---
 @api_router.get("/admin/nodes")
@@ -211,21 +246,24 @@ async def get_distribution():
             username = user['username']
             user_key = f"user:{username}"
             
-            # 1. Encontra o nó primário (Responsável)
+            # Nó primário
             primary = chord.find_responsible_node(user_key, chord_nodes)
             
-            # 2. Encontra as réplicas (Próximos nós ativos no anel)
-            # Pegamos 3 réplicas (o primário costuma ser a primeira)
+            # Réplicas
             replicas = chord.get_replica_nodes(user_key, chord_nodes, count=3)
+            active_nodes = [n for n in [primary] + replicas if n and n.active]
+
+            # Indica se nenhum nó ativo
+            primary_name = primary.name if primary and primary.active else "Offline"
             
-            # 3. Calcula a posição exata no anel (0-255)
+            # Posição no anel
             chord_pos = chord.get_chord_position(user_key)
             
             distribution[username] = {
                 "name": user['name'],
-                "primaryNode": primary.name if primary else "Offline",
-                "primaryNodeId": primary.id if primary else None,
-                "replicaNodes": [r.name for r in replicas if r.id != (primary.id if primary else None)],
+                "primaryNode": primary_name,
+                "primaryNodeId": primary.id if primary and primary.active else None,
+                "replicaNodes": [r.name for r in replicas if r.id != (primary.id if primary else None) and r.active],
                 "chordPosition": chord_pos
             }
 
@@ -233,6 +271,7 @@ async def get_distribution():
     except Exception as e:
         print(f"❌ Erro ao calcular distribuição: {e}")
         raise HTTPException(status_code=500, detail=f"Erro interno: {str(e)}")
+
 
 @api_router.post("/admin/nodes/{node_id}/toggle")
 async def toggle_node(node_id: int = Path(...)):
@@ -242,7 +281,7 @@ async def toggle_node(node_id: int = Path(...)):
     
     if not node:
         raise HTTPException(status_code=404, detail="Nó não encontrado")
-
+    
     # Inverte o status de atividade
     node.active = not node.active
     
@@ -292,6 +331,13 @@ async def websocket_endpoint(websocket: WebSocket, username: str):
             if not text: continue
 
             responsible_node = chord.find_responsible_node(f"user:{target_user}", chord_nodes)
+            if not responsible_node or not responsible_node.active:
+                await websocket.send_text(json.dumps({
+                    "type": "error",
+                    "message": "❌ Todos os nós estão offline. Mensagem não enviada."
+                }))
+                continue
+
             timestamp = int(time.time() * 1000)
             full_message = {
                 "id": f"{timestamp}-{uuid.uuid4().hex[:8]}",
@@ -300,11 +346,20 @@ async def websocket_endpoint(websocket: WebSocket, username: str):
                 "text": text,
                 "timestamp": timestamp,
                 "read": False,
-                "type": "chat"
+                "type": "chat",
+                "deleted_for": []  # lista de usuários que deletaram essa mensagem
             }
 
             delivered = await manager.send_personal_message(full_message, target_user)
-            await kv.set(f"message:{full_message['id']}", full_message)
+
+            if delivered:
+                await kv.set(f"message:{full_message['id']}", full_message)
+            else:
+                await websocket.send_text(json.dumps({
+                    "type": "error",
+                    "message": f"❌ Usuário {target_user} não pôde ser alcançado."
+                }))
+
             
             if not delivered:
                 print(f"📡 Roteando Chord: {target_user} -> {responsible_node.name}")

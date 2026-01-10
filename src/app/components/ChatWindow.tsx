@@ -11,6 +11,7 @@ interface Message {
   read: boolean;
   type?: "chat" | "typing" | "read_receipt";
   status?: "start" | "stop";
+  deleted_for?: string[];
 }
 
 interface ChatWindowProps {
@@ -28,25 +29,32 @@ export function ChatWindow({ globalSocket, currentUsername, otherUsername, other
   const [showProfile, setShowProfile] = useState(false);
   const [loading, setLoading] = useState(true);
   const [isOtherTyping, setIsOtherTyping] = useState(false);
-  
+  const [menuOpen, setMenuOpen] = useState<string | null>(null); // id da mensagem com menu aberto
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const myTypingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const menuRef = useRef<HTMLDivElement | null>(null);
 
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  };
+  const scrollToBottom = () => messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
 
+  useEffect(() => { scrollToBottom(); }, [messages, isOtherTyping]);
+
+  // Fecha menu ao clicar fora
   useEffect(() => {
-    scrollToBottom();
-  }, [messages, isOtherTyping]);
+    const handleClickOutside = (event: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
+        setMenuOpen(null);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
 
   useEffect(() => {
     if (!globalSocket) return;
-
     const handleSocketMessage = (event: MessageEvent) => {
       const data = JSON.parse(event.data);
-
       if (data.from !== otherUsername && data.to !== otherUsername) return;
 
       if (data.type === "typing") {
@@ -58,19 +66,12 @@ export function ChatWindow({ globalSocket, currentUsername, otherUsername, other
           if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
           typingTimeoutRef.current = setTimeout(() => setIsOtherTyping(false), 3000);
         }
-      } 
-      else if (data.type === "read_receipt") {
+      } else if (data.type === "read_receipt") {
         setMessages(prev => prev.map(msg => ({ ...msg, read: true })));
-      } 
-      else if (data.type === "chat") {
+      } else if (data.type === "chat") {
         if (data.from === otherUsername) {
-          setMessages(prev => {
-            // Checagem extra de segurança por ID
-            if (prev.find(m => m.id === data.id)) return prev;
-            return [...prev, data];
-          });
-          onNewMessage(); 
-
+          setMessages(prev => prev.find(m => m.id === data.id) ? prev : [...prev, data]);
+          onNewMessage();
           fetch(`${API_URL}/mark-read`, {
             method: "PUT",
             headers: { "Content-Type": "application/json" },
@@ -79,30 +80,12 @@ export function ChatWindow({ globalSocket, currentUsername, otherUsername, other
         }
       }
     };
-
     globalSocket.addEventListener("message", handleSocketMessage);
     return () => {
       globalSocket.removeEventListener("message", handleSocketMessage);
       if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
     };
   }, [globalSocket, otherUsername, currentUsername]);
-
-  useEffect(() => {
-    const handleResize = () => {
-      if (window.visualViewport) {
-        // Ajusta o scroll para garantir que o input não fique escondido
-        if (document.activeElement?.tagName === 'INPUT') {
-          window.scrollTo(0, 0);
-          setTimeout(() => {
-            scrollToBottom(); // Garante que a última mensagem apareça
-          }, 100);
-        }
-      }
-    };
-
-    window.visualViewport?.addEventListener('resize', handleResize);
-    return () => window.visualViewport?.removeEventListener('resize', handleResize);
-  }, []);
 
   useEffect(() => {
     const fetchHistory = async () => {
@@ -112,10 +95,7 @@ export function ChatWindow({ globalSocket, currentUsername, otherUsername, other
         if (res.ok) {
           const data = await res.json();
           const filtered = data.messages
-            .filter((msg: any) => 
-              (msg.from === currentUsername && msg.to === otherUsername) ||
-              (msg.from === otherUsername && msg.to === currentUsername)
-            )
+            .filter((msg: any) => (msg.from === currentUsername && msg.to === otherUsername) || (msg.from === otherUsername && msg.to === currentUsername))
             .sort((a: any, b: any) => a.timestamp - b.timestamp);
           setMessages(filtered);
         }
@@ -124,50 +104,27 @@ export function ChatWindow({ globalSocket, currentUsername, otherUsername, other
     fetchHistory();
   }, [otherUsername, currentUsername]);
 
-  useEffect(() => {
-    const clearUnread = async () => {
-      try {
-        await fetch(`${API_URL}/mark-read`, {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ username: currentUsername, otherUser: otherUsername })
-        });
-        onNewMessage(); 
-      } catch (e) { console.error(e); }
-    };
-    clearUnread();
-  }, [otherUsername]);
-
   const handleSendMessage = (e: React.FormEvent) => {
     e.preventDefault();
-    
     if (!newMessage.trim() || !globalSocket || globalSocket.readyState !== WebSocket.OPEN) return;
 
     const timestamp = Date.now();
     const msgPayload: Message = {
-      id: `${timestamp}-${Math.random().toString(36).substr(2, 9)}`, // ID mais único
+      id: `${timestamp}-${Math.random().toString(36).substr(2, 9)}`,
       type: "chat",
       from: currentUsername,
       to: otherUsername,
       text: newMessage.trim(),
-      timestamp: timestamp,
-      read: false
+      timestamp,
+      read: false,
+      deleted_for: []
     };
 
-    // 1. Envia a mensagem real
     globalSocket.send(JSON.stringify(msgPayload));
+    globalSocket.send(JSON.stringify({ type: "typing", status: "stop", from: currentUsername, to: otherUsername }));
 
-    // 2. Avisa que parou de digitar (stop typing)
-    globalSocket.send(JSON.stringify({ 
-      type: "typing", 
-      status: "stop", 
-      from: currentUsername, 
-      to: otherUsername 
-    }));
-    
     if (myTypingTimeoutRef.current) clearTimeout(myTypingTimeoutRef.current);
 
-    // 3. Atualiza a tela localmente (Update Otimista) - APENAS UMA VEZ
     setMessages(prev => [...prev, msgPayload]);
     setNewMessage("");
     onNewMessage();
@@ -178,23 +135,9 @@ export function ChatWindow({ globalSocket, currentUsername, otherUsername, other
     setNewMessage(value);
 
     if (globalSocket?.readyState === WebSocket.OPEN) {
-      if (value.trim() === "") {
-        globalSocket.send(JSON.stringify({ 
-          type: "typing", 
-          status: "stop", 
-          from: currentUsername, 
-          to: otherUsername 
-        }));
-        if (myTypingTimeoutRef.current) clearTimeout(myTypingTimeoutRef.current);
-      } else {
-        globalSocket.send(JSON.stringify({ 
-          type: "typing", 
-          status: "start", 
-          from: currentUsername, 
-          to: otherUsername 
-        }));
-
-        if (myTypingTimeoutRef.current) clearTimeout(myTypingTimeoutRef.current);
+      globalSocket.send(JSON.stringify({ type: "typing", status: value.trim() === "" ? "stop" : "start", from: currentUsername, to: otherUsername }));
+      if (myTypingTimeoutRef.current) clearTimeout(myTypingTimeoutRef.current);
+      if (value.trim() !== "") {
         myTypingTimeoutRef.current = setTimeout(() => {
           globalSocket.send(JSON.stringify({ type: "typing", status: "stop", from: currentUsername, to: otherUsername }));
         }, 2000);
@@ -202,8 +145,23 @@ export function ChatWindow({ globalSocket, currentUsername, otherUsername, other
     }
   };
 
-  const formatMessageTime = (ts: number) => {
-    return new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const formatMessageTime = (ts: number) => new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+  const deleteMessage = async (msg: Message, deleteForAll = false) => {
+    try {
+      const query = `?username=${currentUsername}&delete_for_all=${deleteForAll}`;
+      const res = await fetch(`${API_URL}/messages/${msg.id}${query}`, { method: "DELETE" });
+      if (res.ok) {
+        setMessages(prev =>
+          deleteForAll
+            ? prev.filter(m => m.id !== msg.id)
+            : prev.map(m => m.id === msg.id ? { ...m, deleted_for: [...(m.deleted_for || []), currentUsername] } : m)
+        );
+      } else {
+        const data = await res.json();
+        alert(data.detail || "Não foi possível deletar a mensagem.");
+      }
+    } catch (e) { console.error(e); }
   };
 
   return (
@@ -236,25 +194,39 @@ export function ChatWindow({ globalSocket, currentUsername, otherUsername, other
             ) : messages.length === 0 ? (
               <div className="h-full flex items-center justify-center text-gray-400 italic">Diga "Olá" para {otherName}!</div>
             ) : (
-              messages.map((msg) => {
+              messages.map(msg => {
                 const isOwn = msg.from === currentUsername;
+                const isDeleted = msg.deleted_for?.includes(currentUsername);
                 return (
-                  <div key={msg.id} className={`flex ${isOwn ? "justify-end" : "justify-start"}`}>
+                  <div key={msg.id} className={`flex ${isOwn ? "justify-end" : "justify-start"} relative`}>
                     <div className={`max-w-[75%] rounded-2xl px-4 py-2 shadow-sm ${isOwn ? "bg-gradient-to-r from-blue-500 to-purple-600 text-white" : "bg-white border text-gray-900"}`}>
-                      <p className="break-words">{msg.text}</p>
+                      <p className={`break-words ${isDeleted ? "italic text-gray-400" : ""}`}>
+                        {isDeleted ? "Mensagem deletada" : msg.text}
+                      </p>
                       <div className="flex items-center justify-end gap-1 mt-1">
                         <span className={`text-[10px] ${isOwn ? "text-blue-100" : "text-gray-400"}`}>{formatMessageTime(msg.timestamp)}</span>
-                        {isOwn && (
-                          <span className="text-[10px]">
-                            {msg.read ? (
-                              <svg className="w-3 h-3 text-blue-200 fill-current" viewBox="0 0 20 20"><path d="M19 6.7l-1.4-1.4-9.3 9.3-4.3-4.3-1.4 1.4 5.7 5.7zM14.7 6.7l-1.4-1.4-5 5 1.4 1.4z" /></svg>
-                            ) : (
-                              <svg className="w-3 h-3 text-blue-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M5 13l4 4L19 7" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"/></svg>
-                            )}
-                          </span>
-                        )}
                       </div>
                     </div>
+
+                    {/* Menu */}
+                    {!isDeleted && (
+                      <div ref={menuRef} className="relative">
+                        <button
+                          onClick={() => setMenuOpen(menuOpen === msg.id ? null : msg.id)}
+                          className={`text-gray-400 hover:text-gray-600 ${isOwn ? "ml-1" : "ml-1"}`}
+                        >
+                          &#x22EE;
+                        </button>
+                        {menuOpen === msg.id && (
+                          <div className={`absolute ${isOwn ? "right-0" : "left-0"} mt-1 w-40 bg-white border rounded-lg shadow-lg flex flex-col z-10`}>
+                            <button onClick={() => { deleteMessage(msg, false); setMenuOpen(null); }} className="px-4 py-2 text-left hover:bg-gray-100">Apagar para mim</button>
+                            {isOwn && (
+                              <button onClick={() => { deleteMessage(msg, true); setMenuOpen(null); }} className="px-4 py-2 text-left hover:bg-gray-100 text-red-600">Apagar para todos</button>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                 );
               })
@@ -271,7 +243,7 @@ export function ChatWindow({ globalSocket, currentUsername, otherUsername, other
             <div ref={messagesEndRef} />
           </div>
 
-          {/* Input Form */}
+          {/* Input */}
           <form onSubmit={handleSendMessage} className="p-4 border-t bg-white">
             <div className="flex gap-2">
               <input
